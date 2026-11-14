@@ -22,11 +22,45 @@ _ALUNOS_SIMULADOS = {
 
 def buscar_aluno(matricula: str, token: str, config) -> dict | None:
     """Retorna {matricula, situacao, curso_nome} ou None se não existir"""
-    if config["SUAP_MODO"] == "simulado":
-        return _buscar_simulado(matricula, token)
-    raise NotImplementedError(
-        "Consulta real ao SUAP será implementada na tarefa 'Consultar aluno no SUAP'"
+    req = requests.get(
+        f'{config["SUAP_BASE_URL"]}/ensino/alunos/v1/',
+        params = {"search": matricula},
+        headers = {"Authorization": f"Token {token}"},
+        timeout=10
     )
+
+    req.raise_for_status()
+
+    res = req.json()
+
+    dados = res.get("results", [])
+
+    for dado in dados:
+
+        # 1. Comparação exata da matrícula
+        if str(dado.get("matricula", "")).strip() != str(matricula).strip():
+            continue
+
+        # 2. Verificação da situação
+        situacao = dado.get("situacao", "")
+
+        if situacao.strip().casefold() != "matriculado":
+            continue
+
+        # 3. Verificação do campus
+        curso = dado.get("curso") or {}
+        nome_curso = curso.get("nome", "")
+
+        if "CAMPUS GUARABIRA" not in nome_curso.upper():
+            continue
+
+        return {
+            "matricula": dado.get("matricula"),
+            "situacao": situacao,
+            "curso_nome": nome_curso
+        }
+
+    return None
 
 
 def _buscar_simulado(matricula: str, token: str) -> dict | None:
