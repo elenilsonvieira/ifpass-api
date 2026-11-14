@@ -12,7 +12,7 @@ def status():
 
 def _ler_token():
     """Extrai o token do cabeçalho Authorization."""
-    prefixo = "Token "
+    prefixo = "Bearer "
     cabecalho = request.headers.get("Authorization", "")
     if not cabecalho.startswith(prefixo):
         return None

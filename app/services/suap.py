@@ -1,3 +1,5 @@
+import requests
+
 class SuapIndisponivel(Exception):
     """Mostra um erro possível: Timeout, erro de rede ou 5xx do SUAP"""
 
@@ -25,7 +27,7 @@ def buscar_aluno(matricula: str, token: str, config) -> dict | None:
     req = requests.get(
         f'{config["SUAP_BASE_URL"]}/ensino/alunos/v1/',
         params = {"search": matricula},
-        headers = {"Authorization": f"Token {token}"},
+        headers = {"Authorization": f"Bearer {token}"},
         timeout=10
     )
 
