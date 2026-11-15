@@ -33,8 +33,14 @@ def buscar_aluno(matricula: str, token: str, config) -> dict | None:
         f'{config["SUAP_BASE_URL"]}/ensino/alunos/v1/',
         params = {"search": matricula},
         headers = {"Authorization": f"Bearer {token}"},
-        timeout=10
+        timeout=config['SUAP_TIMEOUT_SEGUNDOS']
     )
+    
+    if req.status_code == 401:
+        raise SuapTokenRecusado()
+
+    if req.status_code == 403:
+        raise SuapTokenRecusado()
 
     req.raise_for_status()
 
