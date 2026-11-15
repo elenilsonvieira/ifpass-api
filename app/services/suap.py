@@ -24,6 +24,11 @@ _ALUNOS_SIMULADOS = {
 
 def buscar_aluno(matricula: str, token: str, config) -> dict | None:
     """Retorna {matricula, situacao, curso_nome} ou None se não existir"""
+
+    # Verifica se está em modo simulado; se estiver, usa _buscar_simulado
+    if config.get("SUAP_MODO") == "simulado":
+        return _buscar_simulado(matricula, token)
+
     req = requests.get(
         f'{config["SUAP_BASE_URL"]}/ensino/alunos/v1/',
         params = {"search": matricula},
