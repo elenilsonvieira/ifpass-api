@@ -1,6 +1,7 @@
 from flask import Blueprint, current_app, jsonify, request
 
 from app.services import suap
+from app.services.historico import registrar_tentativa_acesso
 
 bp = Blueprint("v1", __name__)
 
@@ -59,4 +60,17 @@ def _decidir_acesso():
 @bp.post("/acessos/validar")
 def validar_acesso():
     corpo, codigo = _decidir_acesso()
+    matricula = _ler_matricula()
+
+    resultado = "Erro"
+    detalhes_erro = corpo.get("erro")
+
+    if codigo == 200:
+        if corpo.get("autorizado") == True:
+            resultado = "Permitido"
+        else:
+            resultado = "Negado"
+
+    registrar_tentativa_acesso(matricula, resultado, detalhes_erro)
+
     return jsonify(corpo), codigo

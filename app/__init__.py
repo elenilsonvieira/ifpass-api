@@ -1,11 +1,15 @@
 from flask import Flask, jsonify
 
 from app.config import Config
+from app.db import init_db
 
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+
+    # Inicializa o banco de dados, criando as tabelas se necessário
+    init_db()
 
     from app.v1.routes import bp as v1_bp
 

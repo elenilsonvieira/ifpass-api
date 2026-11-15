@@ -49,13 +49,13 @@ pytest
 ### POST /v1/acessos/validar
 
 Corpo JSON com a matrícula (12 dígitos) e o token do SUAP no cabeçalho
-`Authorization: Token <token>`.
+`Authorization: Bearer <token>`.
 
 PowerShell:
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:5000/v1/acessos/validar `
-  -Headers @{ Authorization = "Token <token>" } `
+  -Headers @{ Authorization = "Bearer <token>" } `
   -ContentType "application/json" `
   -Body '{"matricula": "202312345601"}'
 ```
@@ -64,7 +64,7 @@ curl (Linux):
 
 ```bash
 curl -X POST http://127.0.0.1:5000/v1/acessos/validar \
-  -H "Authorization: Token <token>" \
+  -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"matricula": "202312345601"}'
 ```
@@ -74,7 +74,6 @@ curl -X POST http://127.0.0.1:5000/v1/acessos/validar \
 | 200 | `{"autorizado": true/false}` | Consulta concluída |
 | 400 | `{"erro": "matricula invalida"}` | Corpo inválido ou matrícula fora do formato |
 | 401 | `{"erro": "token ausente"}` / `{"erro": "token recusado pelo SUAP"}` | Sem token ou token recusado (o app deve pedir novo login) |
-| 501 | `{"erro": "modo real nao implementado"}` | `SUAP_MODO=real` (ainda não implementado) |
 | 503 | `{"erro": "SUAP indisponivel"}` | Falha ao consultar o SUAP (nunca devolve `autorizado: false` nesse caso) |
 
 Com `SUAP_MODO=simulado`, a API usa matrículas fictícias:
@@ -88,3 +87,16 @@ Com `SUAP_MODO=simulado`, a API usa matrículas fictícias:
 | outra qualquer | negado (não encontrada) |
 | `000000000000` | 503 (simula SUAP fora do ar) |
 | token `invalido` | 401 (simula token recusado) |
+
+## Histórico de acessos
+
+Cada chamada a `/v1/acessos/validar` é registrada em `ifpass.db` (SQLite,
+criado automaticamente e não versionado), na tabela `historico_acessos`, com
+`matricula`, `data_hora`, `resultado` (`Permitido`, `Negado` ou `Erro`) e
+`detalhes_erro`. O token não é gravado.
+
+Para consultar sem alterar nada:
+
+```bash
+python -c "import sqlite3; [print(l) for l in sqlite3.connect('ifpass.db').execute('SELECT * FROM historico_acessos')]"
+```

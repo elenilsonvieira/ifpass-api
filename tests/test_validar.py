@@ -5,7 +5,7 @@ from app.config import Config
 from app.services.suap import autorizado
 
 URL = "/v1/acessos/validar"
-CABECALHO = {"Authorization": "Token abc"}
+CABECALHO = {"Authorization": "Bearer abc"}
 
 
 class ConfigTeste(Config):
@@ -43,7 +43,7 @@ def test_autorizacao(cliente, matricula, esperado):
 
 
 @pytest.mark.parametrize(
-    "headers", [{}, {"Authorization": "Bearer x"}, {"Authorization": "Token "}]
+    "headers", [{}, {"Authorization": "Basic x"}, {"Authorization": "Bearer "}]
 )
 def test_token_ausente(cliente, headers):
     r = validar(cliente, {"matricula": "202312345601"}, headers=headers)
@@ -79,7 +79,7 @@ def test_token_recusado(cliente):
     r = validar(
         cliente,
         {"matricula": "202312345601"},
-        headers={"Authorization": "Token invalido"},
+        headers={"Authorization": "Bearer invalido"},
     )
     assert r.status_code == 401
     assert r.get_json() == {"erro": "token recusado pelo SUAP"}
@@ -91,11 +91,49 @@ def test_suap_indisponivel(cliente):
     assert "autorizado" not in r.get_json()
 
 
-def test_modo_real_nao_implementado():
+class RespostaFalsa:
+    """Imitação da resposta do SUAP, para testar o modo real sem internet."""
+
+    def __init__(self, dados):
+        self._dados = dados
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._dados
+
+
+@pytest.mark.parametrize(
+    "situacao, esperado", [("Matriculado", True), ("Evadido", False)]
+)
+def test_modo_real(monkeypatch, situacao, esperado):
+    chamadas = []
+
+    def get_falso(url, **kwargs):
+        chamadas.append(kwargs)
+        return RespostaFalsa(
+            {
+                "results": [
+                    {
+                        "matricula": "202312345601",
+                        "situacao": situacao,
+                        "curso": {
+                            "nome": "TECNOLOGIA EM SISTEMAS PARA INTERNET (CAMPUS GUARABIRA)"
+                        },
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.services.suap.requests.get", get_falso)
     cliente = create_app(ConfigReal).test_client()
+
     r = validar(cliente, {"matricula": "202312345601"})
-    assert r.status_code == 501
-    assert r.get_json() == {"erro": "modo real nao implementado"}
+
+    assert r.status_code == 200
+    assert r.get_json() == {"autorizado": esperado}
+    assert chamadas[0]["headers"] == {"Authorization": "Bearer abc"}
 
 
 def test_metodo_nao_permitido(cliente):
