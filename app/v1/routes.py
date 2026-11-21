@@ -1,3 +1,4 @@
+
 from flask import Blueprint, current_app, jsonify, request
 
 from app.services import suap
@@ -11,20 +12,30 @@ def status():
     return jsonify({"status": "ok"}), 200
 
 
-def _ler_token():
-    """Extrai o token do cabeçalho Authorization."""
-    prefixo = "Bearer "
-    cabecalho = request.headers.get("Authorization", "")
-    if not cabecalho.startswith(prefixo):
+def _ler_senha():
+    """Extrai a senha do corpo da requisição."""
+    corpo = request.get_json(silent=True)
+
+    if not isinstance(corpo, dict):
         return None
-    return cabecalho[len(prefixo) :].strip() or None
+
+    senha = corpo.get("senha")
+
+    if not isinstance(senha, str) or not senha:
+        return None
+
+    return senha
 
 
 def _ler_matricula():
+    """Extrai e valida a matrícula do corpo da requisição."""
     corpo = request.get_json(silent=True)
+
     if not isinstance(corpo, dict):
         return None
+
     matricula = corpo.get("matricula")
+
     if (
         isinstance(matricula, str)
         and len(matricula) == 12
@@ -32,29 +43,69 @@ def _ler_matricula():
         and matricula.isdigit()
     ):
         return matricula
+
     return None
 
 
 def _decidir_acesso():
-    """Decide o resultado final e devolve (corpo, status)"""
-    token = _ler_token()
-    if token is None:
-        return {"erro": "token ausente"}, 401
+    """Decide o resultado final e devolve (corpo, status)."""
 
     matricula = _ler_matricula()
     if matricula is None:
-        return {"erro": "matricula invalida"}, 400
+        return {
+            "erro": "matricula_invalida",
+            "mensagem": "A matrícula deve conter exatamente 12 dígitos."
+        }, 400
+
+    senha = _ler_senha()
+    if senha is None:
+        return {
+            "erro": "senha_ausente",
+            "mensagem": "A senha deve ser informada."
+        }, 400
 
     try:
-        aluno = suap.buscar_aluno(matricula, token, current_app.config)
-    except suap.SuapTokenRecusado:
-        return {"erro": "token recusado pelo SUAP"}, 401
-    except suap.SuapIndisponivel:
-        return {"erro": "SUAP indisponivel"}, 503
-    except NotImplementedError:
-        return {"erro": "modo real nao implementado"}, 501
+        # 1. Autenticar no SUAP
+        tokens = suap.autenticar(
+            matricula,
+            senha,
+            current_app.config
+        )
 
-    return {"autorizado": suap.autorizado(aluno)}, 200
+        # 2. Obter access e refresh
+        token = tokens["access"]
+
+        # 3. Consultar aluno usando o access token
+        aluno = suap.buscar_aluno(
+            matricula,
+            token,
+            current_app.config
+        )
+
+    except suap.SuapErro as erro:
+        corpo = erro.para_json()
+
+        if erro.status_suap in (400, 401):
+            return corpo, 401
+
+        if erro.status_suap == 403:
+            return corpo, 403
+
+        if erro.status_suap == 429:
+            return corpo, 503
+
+        if erro.status_suap is not None and erro.status_suap >= 500:
+            return corpo, 503
+
+        if erro.codigo in ("timeout", "erro_conexao"):
+            return corpo, 503
+
+        return corpo, 502
+
+    # 4. Verificar autorização
+    return {
+        "autorizado": suap.autorizado(aluno)
+    }, 200
 
 
 @bp.post("/acessos/validar")
@@ -71,6 +122,10 @@ def validar_acesso():
         else:
             resultado = "Negado"
 
-    registrar_tentativa_acesso(matricula, resultado, detalhes_erro)
+    registrar_tentativa_acesso(
+        matricula,
+        resultado,
+        detalhes_erro
+    )
 
     return jsonify(corpo), codigo
