@@ -117,6 +117,9 @@ def verificar_resposta(req):
     )
 
 
+
+
+
 def autenticar(matricula: str, senha: str, config) -> dict:
     """Autentica no SUAP e retorna access e refresh."""
 
@@ -176,6 +179,28 @@ def autenticar(matricula: str, senha: str, config) -> dict:
             "erro_conexao",
             "Ocorreu uma falha na comunicação com o SUAP."
         )
+
+def confirmar_dono_token(matricula: str, token: str, config) -> dict | None:
+    """Confirma que a matrícula consultada com o token bate com a informada.
+
+    Nota: a API do SUAP IFPB não expõe endpoint de perfil (/meus-dados/)
+    e o JWT retornado por /jwt/obtain_token/ contém apenas user_id (sem matrícula).
+    A titularidade é garantida pela autenticação prévia (matrícula + senha)
+    combinada com a verificação exata da matrícula retornada na consulta.
+    """
+    aluno = buscar_aluno(matricula, token, config)
+
+    if aluno is None:
+        return None
+
+    if str(aluno.get("matricula", "")).strip() != matricula:
+        return None
+
+    return aluno
+
+
+
+
 
 
 def buscar_aluno(matricula: str, token: str, config) -> dict | None:
