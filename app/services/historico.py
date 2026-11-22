@@ -1,18 +1,23 @@
 from app.db import get_db_connection
 from datetime import datetime
 
-def registrar_tentativa_acesso(matricula: str, status: str, erro: str = None):
+
+def registrar_tentativa_acesso(
+    matricula: str,
+    status: str,
+    erro: str = None,
+    catraca_id: str = None
+):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        """pega a hora atual"""
         data_atual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         cursor.execute('''
-            INSERT INTO historico_acessos (matricula, data_hora, resultado, detalhes_erro)
-            VALUES (?, ?, ?, ?)
-        ''', (matricula, data_atual, status, erro))
+            INSERT INTO historico_acessos (matricula, catraca_id, data_hora, resultado, detalhes_erro)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (matricula, catraca_id, data_atual, status, erro))
 
         conn.commit()
         conn.close()
