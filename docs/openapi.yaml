@@ -1,0 +1,82 @@
+openapi: 3.0.3
+info:
+  title: IFPASS API
+  version: 1.0.0
+  description: Validação de acesso por matrícula, senha SUAP e catraca cadastrada.
+servers:
+  - url: http://localhost:5000
+paths:
+  /v1/status:
+    get:
+      summary: Verificar status da API
+      responses:
+        '200':
+          description: API disponível
+          content:
+            application/json:
+              example: {status: ok}
+
+  /v1/acessos/validar:
+    post:
+      summary: Validar acesso de aluno
+      description: Autentica no SUAP, consulta a matrícula e verifica situação, campus e catraca.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [matricula, senha, catraca_id]
+              properties:
+                matricula:
+                  type: string
+                  pattern: '^[0-9]{12}$'
+                  example: '202400000001'
+                senha:
+                  type: string
+                  format: password
+                  example: 'SUA_SENHA'
+                catraca_id:
+                  type: string
+                  example: CATRACA-01
+            example:
+              matricula: '202400000001'
+              senha: SUA_SENHA
+              catraca_id: CATRACA-01
+      responses:
+        '200':
+          description: Consulta concluída, acesso permitido ou negado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autorizado: {type: boolean}
+              examples:
+                permitido: {value: {autorizado: true}}
+                negado: {value: {autorizado: false}}
+        '400':
+          description: Matrícula inválida, senha ausente ou catraca ausente
+          content:
+            application/json:
+              example: {erro: matricula_invalida, mensagem: 'A matrícula deve conter exatamente 12 dígitos.'}
+        '401':
+          description: Credenciais ou token recusados pelo SUAP
+          content:
+            application/json:
+              example: {erro: autenticacao_recusada, mensagem: 'O SUAP recusou as credenciais ou o token.', origem: SUAP, status_suap: 401, detalhes: null}
+        '403':
+          description: Catraca não cadastrada ou operação proibida pelo SUAP
+          content:
+            application/json:
+              example: {erro: catraca_nao_cadastrada, mensagem: 'A catraca informada não está cadastrada.'}
+        '502':
+          description: Resposta inesperada do SUAP (incluindo recurso não encontrado)
+          content:
+            application/json:
+              example: {erro: resposta_invalida, mensagem: 'O SUAP retornou um formato de consulta inválido.', origem: SUAP, status_suap: 200, detalhes: null}
+        '503':
+          description: SUAP indisponível, timeout ou limite de requisições
+          content:
+            application/json:
+              example: {erro: timeout, mensagem: 'O SUAP demorou demais para responder.', origem: SUAP, status_suap: null, detalhes: null}
