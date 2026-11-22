@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: ifpass-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn "app:create_app()" --bind 0.0.0.0:$PORT --workers 1 --timeout 30
+    healthCheckPath: /v1/status
+    envVars:
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: SUAP_BASE_URL
+        value: https://suap.ifpb.edu.br/api
+      - key: SUAP_TIMEOUT_SEGUNDOS
+        value: "10"
+      - key: CATRACAS_CADASTRADAS
+        value: CATRACA-01
