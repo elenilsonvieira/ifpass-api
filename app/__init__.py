@@ -12,8 +12,10 @@ def create_app(config_class=Config):
     init_db()
 
     from app.v1.routes import bp as v1_bp
+    from app.v1.auth_routes import bp as auth_bp
 
     app.register_blueprint(v1_bp, url_prefix="/v1")
+    app.register_blueprint(auth_bp, url_prefix="/v1/auth")
 
     # A API responde JSON
     @app.errorhandler(404)

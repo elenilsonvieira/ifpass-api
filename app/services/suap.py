@@ -170,17 +170,15 @@ def autenticar(matricula: str, senha: str, config) -> dict:
         access = res.get("access")
         refresh = res.get("refresh")
 
-        if (
-            not isinstance(access, str)
-            or not access
-            or not isinstance(refresh, str)
-            or not refresh
-        ):
+        if not isinstance(access, str) or not access:
             raise SuapErro(
                 "tokens_ausentes",
-                "O SUAP não retornou access e refresh válidos.",
+                "O SUAP não retornou um access token válido.",
                 status_suap=req.status_code
             )
+
+        if not isinstance(refresh, str) or not refresh:
+            refresh = None
 
         return {
             "access": access,
@@ -288,6 +286,7 @@ def buscar_aluno(matricula: str, token: str, config) -> dict | None:
 
             return {
                 "matricula": dado.get("matricula"),
+                "nome": _texto(dado.get("nome")),
                 "situacao": situacao,
                 "curso_nome": nome_curso
             }
