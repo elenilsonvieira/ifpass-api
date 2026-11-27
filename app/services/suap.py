@@ -1,6 +1,6 @@
 
 import requests
-
+from app.services.suap_token import SuapTokenManager, TokenServicoExpirado
 
 class SuapIndisponivel(Exception):
     """Timeout, erro de rede ou 5xx do SUAP"""
@@ -34,11 +34,33 @@ class SuapErro(Exception):
         }
 
 
-_CURSO_GUARABIRA = "TECNOLOGIA EM SISTEMAS PARA INTERNET (CAMPUS GUARABIRA)"
-
 # Nome do parâmetro de busca da consulta de servidores no SUAP.
 _PARAM_BUSCA_SERVIDOR = "search"
 
+
+# Nomes de situação (em maiúsculas) que liberam o servidor. Fácil de ampliar.
+_NOMES_SERVIDOR_ATIVO = {"ATIVO PERMANENTE", "CONT.PROF.SUBSTITUTO"}
+
+_gerenciadores_token = {}
+
+
+def obter_token_servico(config) -> str:
+    """Obtém o token de serviço configurado e valida sua expiração."""
+    chave = id(config)
+    gerenciador = _gerenciadores_token.get(chave)
+
+    if gerenciador is None:
+        gerenciador = SuapTokenManager(config)
+        _gerenciadores_token[chave] = gerenciador
+
+    try:
+        return gerenciador.obter_token_servico()
+    except TokenServicoExpirado as erro:
+        raise SuapErro(
+            "token_servico_expirado",
+            str(erro),
+            status_suap=503
+        ) from erro
 
 def verificar_resposta(req):
     """Verifica a resposta HTTP e identifica erros do SUAP."""
@@ -387,13 +409,20 @@ def buscar_servidor(matricula: str, token: str, config) -> dict | None:
 
 
 def autorizado(aluno: dict | None) -> bool:
-    """Verifica se o aluno está matriculado no Campus Guarabira."""
+    """Verifica se o aluno está com situação "Matriculado" (qualquer campus)."""
 
     if aluno is None:
         return False
 
-    return (
-        str(aluno.get("situacao", "")).strip().casefold() == "matriculado"
-        and "CAMPUS GUARABIRA"
-        in str(aluno.get("curso_nome", "")).upper()
-    )
+    return _texto(aluno.get("situacao")).casefold() == "matriculado"
+
+
+
+
+def servidor_autorizado(servidor: dict | None) -> bool:
+    """Verifica se o nome da situação do servidor está em _NOMES_SERVIDOR_ATIVO."""
+
+    if servidor is None:
+        return False
+
+    return _texto(servidor.get("situacao_nome")).upper() in _NOMES_SERVIDOR_ATIVO
