@@ -7,6 +7,10 @@ from app.services.historico import registrar_tentativa_acesso
 bp = Blueprint("v1", __name__)
 
 
+_TAMANHOS_MATRICULA_VALIDOS = {7, 12}
+
+
+
 @bp.get("/status")
 def status():
     return jsonify({"status": "ok"}), 200
@@ -26,23 +30,8 @@ def _ler_catraca_id():
     return catraca_id.strip().upper()
 
 
-def _ler_senha():
-    """Extrai a senha do corpo da requisição."""
-    corpo = request.get_json(silent=True)
-
-    if not isinstance(corpo, dict):
-        return None
-
-    senha = corpo.get("senha")
-
-    if not isinstance(senha, str) or not senha:
-        return None
-
-    return senha
-
-
 def _ler_matricula():
-    """Extrai e valida a matrícula do corpo da requisição."""
+    """Extrai e valida a matrícula (12 dígitos para aluno ou 7 para servidor)."""
     corpo = request.get_json(silent=True)
 
     if not isinstance(corpo, dict):
@@ -52,7 +41,7 @@ def _ler_matricula():
 
     if (
         isinstance(matricula, str)
-        and len(matricula) == 12
+        and len(matricula) in _TAMANHOS_MATRICULA_VALIDOS
         and matricula.isascii()
         and matricula.isdigit()
     ):
@@ -68,18 +57,8 @@ def _decidir_acesso():
     if matricula is None:
         return {
             "erro": "matricula_invalida",
-            "mensagem": "A matrícula deve conter exatamente 12 dígitos."
+            "mensagem": "A matrícula deve conter 12 dígitos (aluno) ou 7 dígitos (servidor)."
         }, 400
-
-    senha = _ler_senha()
-    if senha is None:
-        return {
-            "erro": "senha_ausente",
-            "mensagem": "A senha deve ser informada."
-        }, 400
-
-
-
 
     catraca_id = _ler_catraca_id()
     if catraca_id is None:
@@ -94,27 +73,29 @@ def _decidir_acesso():
             "mensagem": "A catraca informada não está cadastrada."
         }, 403
 
-
     try:
-        # 1. Autenticar no SUAP
-        tokens = suap.autenticar(
-            matricula,
-            senha,
-            current_app.config
-        )
+        token = suap.obter_token_servico(current_app.config)
 
-        # 2. Obter access e refresh
-        token = tokens["access"]
-
-        # 3. Confirmar dono do token e consultar aluno
-        aluno = suap.confirmar_dono_token(
-            matricula,
-            token,
-            current_app.config
-        )
+        if len(matricula) == 12:
+            aluno = suap.buscar_aluno(
+                matricula,
+                token,
+                current_app.config
+            )
+            liberado = suap.autorizado(aluno)
+        else:
+            servidor = suap.buscar_servidor(
+                matricula,
+                token,
+                current_app.config
+            )
+            liberado = suap.servidor_autorizado(servidor)
 
     except suap.SuapErro as erro:
         corpo = erro.para_json()
+
+        if erro.codigo == "token_servico_expirado":
+            return corpo, 503
 
         if erro.status_suap in (400, 401):
             return corpo, 401
@@ -135,7 +116,7 @@ def _decidir_acesso():
 
     # 4. Verificar autorização
     return {
-        "autorizado": suap.autorizado(aluno)
+        "autorizado": liberado
     }, 200
 
 

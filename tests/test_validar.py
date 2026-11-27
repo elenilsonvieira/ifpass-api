@@ -7,10 +7,10 @@ from app.services.suap import SuapErro, autorizado
 
 URL = "/v1/acessos/validar"
 MATRICULA = "202312345601"
-SENHA = "senha-de-teste"
-TOKEN_ACESSO = "token-acesso-de-teste"
+MATRICULA_SERVIDOR = "1000001"
+TOKEN_SERVICO = "token-servico-de-teste"
 CURSO_GUARABIRA = "TECNOLOGIA EM SISTEMAS PARA INTERNET (CAMPUS GUARABIRA)"
-CORPO_VALIDO = {"matricula": MATRICULA, "senha": SENHA, "catraca_id": "CATRACA-01"}
+CORPO_VALIDO = {"matricula": MATRICULA, "catraca_id": "CATRACA-01"}
 
 
 class ConfigTeste(Config):
@@ -29,25 +29,40 @@ def cliente():
 def suap_falso(monkeypatch):
     """Troca as chamadas ao SUAP por versões falsas (nunca acessa a internet).
 
-    Devolve um dict para o teste escolher o aluno e registra o que foi chamado.
+    Devolve um dict para o teste escolher o aluno/servidor e registra o que
+    foi chamado.
     """
-    estado = {"aluno": None, "chamadas": []}
+    estado = {"aluno": None, "servidor": None, "chamadas": []}
 
-    def autenticar_falso(matricula, senha, config):
-        estado["chamadas"].append(("autenticar", matricula, senha))
-        return {"access": TOKEN_ACESSO, "refresh": "refresh-de-teste"}
+    def token_falso(config):
+        estado["chamadas"].append(("obter_token_servico",))
+        return TOKEN_SERVICO
 
     def buscar_aluno_falso(matricula, token, config):
         estado["chamadas"].append(("buscar_aluno", matricula, token))
         return estado["aluno"]
 
-    monkeypatch.setattr(suap, "autenticar", autenticar_falso)
+    def buscar_servidor_falso(matricula, token, config):
+        estado["chamadas"].append(("buscar_servidor", matricula, token))
+        return estado["servidor"]
+
+    monkeypatch.setattr(suap, "obter_token_servico", token_falso)
     monkeypatch.setattr(suap, "buscar_aluno", buscar_aluno_falso)
+    monkeypatch.setattr(suap, "buscar_servidor", buscar_servidor_falso)
     return estado
 
 
 def aluno(situacao="Matriculado", curso=CURSO_GUARABIRA, matricula=MATRICULA):
     return {"matricula": matricula, "situacao": situacao, "curso_nome": curso}
+
+
+def servidor(nome_situacao="ATIVO PERMANENTE", codigo="01"):
+    return {
+        "matricula": MATRICULA_SERVIDOR,
+        "nome": "Servidor Teste",
+        "situacao_codigo": codigo,
+        "situacao_nome": nome_situacao,
+    }
 
 
 def validar(cliente, corpo=CORPO_VALIDO, **kwargs):
@@ -62,30 +77,63 @@ def sem(chave):
     "dados_aluno, esperado",
     [
         (aluno(), True),
+        (aluno(curso="TECNOLOGIA EM ALIMENTOS (CAMPUS SOUSA)"), True),
         (aluno(situacao="Evadido"), False),
         (aluno(situacao="Formado"), False),
-        (aluno(curso="TECNOLOGIA EM ALIMENTOS (CAMPUS SOUSA)"), False),
         (None, False),  # matrícula não encontrada
-        (aluno(matricula="999999999999"), False),  # dono do token não confere
     ],
 )
-def test_autorizacao(cliente, suap_falso, dados_aluno, esperado):
+def test_autorizacao_aluno(cliente, suap_falso, dados_aluno, esperado):
     suap_falso["aluno"] = dados_aluno
     r = validar(cliente)
     assert r.status_code == 200
     assert r.get_json() == {"autorizado": esperado}
 
 
-def test_envia_credenciais_ao_suap_e_nao_devolve_segredos(cliente, suap_falso):
+@pytest.mark.parametrize(
+    "dados_servidor, esperado",
+    [
+        (servidor(), True),
+        (servidor("CONT.PROF.SUBSTITUTO", "52"), True),
+        (servidor("APOSENTADO", "01"), False),
+        (None, False),  # matrícula não encontrada
+    ],
+)
+def test_autorizacao_servidor(cliente, suap_falso, dados_servidor, esperado):
+    suap_falso["servidor"] = dados_servidor
+    r = validar(cliente, {**CORPO_VALIDO, "matricula": MATRICULA_SERVIDOR})
+    assert r.status_code == 200
+    assert r.get_json() == {"autorizado": esperado}
+
+
+def test_usa_token_de_servico_e_roteia_pelo_tamanho(cliente, suap_falso):
     suap_falso["aluno"] = aluno()
-    r = validar(cliente)
+    suap_falso["servidor"] = servidor()
+
+    validar(cliente)
     assert suap_falso["chamadas"] == [
-        ("autenticar", MATRICULA, SENHA),
-        ("buscar_aluno", MATRICULA, TOKEN_ACESSO),
+        ("obter_token_servico",),
+        ("buscar_aluno", MATRICULA, TOKEN_SERVICO),
     ]
+
+    suap_falso["chamadas"].clear()
+    validar(cliente, {**CORPO_VALIDO, "matricula": MATRICULA_SERVIDOR})
+    assert suap_falso["chamadas"] == [
+        ("obter_token_servico",),
+        ("buscar_servidor", MATRICULA_SERVIDOR, TOKEN_SERVICO),
+    ]
+
+
+def test_senha_enviada_e_ignorada_e_token_nao_vaza(cliente, suap_falso):
+    suap_falso["aluno"] = aluno()
+    r = validar(cliente, {**CORPO_VALIDO, "senha": "senha-por-engano"})
+    assert r.status_code == 200
+    assert r.get_json() == {"autorizado": True}
     texto = r.get_data(as_text=True)
-    assert SENHA not in texto
-    assert TOKEN_ACESSO not in texto
+    assert "senha-por-engano" not in texto
+    assert TOKEN_SERVICO not in texto
+    # A senha nunca chega ao SUAP.
+    assert all("senha-por-engano" not in str(c) for c in suap_falso["chamadas"])
 
 
 def test_catraca_aceita_minuscula_e_espacos(cliente, suap_falso):
@@ -101,6 +149,7 @@ def test_catraca_aceita_minuscula_e_espacos(cliente, suap_falso):
         {**CORPO_VALIDO, "matricula": "20231234560"},
         {**CORPO_VALIDO, "matricula": "2023123456011"},
         {**CORPO_VALIDO, "matricula": "20231234560a"},
+        {**CORPO_VALIDO, "matricula": "12345678"},
         {**CORPO_VALIDO, "matricula": ""},
         {**CORPO_VALIDO, "matricula": 202312345601},
         {**CORPO_VALIDO, "matricula": None},
@@ -119,17 +168,6 @@ def test_corpo_nao_json(cliente, suap_falso):
     r = cliente.post(URL, data="isso nao e json", content_type="text/plain")
     assert r.status_code == 400
     assert r.get_json()["erro"] == "matricula_invalida"
-
-
-@pytest.mark.parametrize(
-    "corpo",
-    [sem("senha"), {**CORPO_VALIDO, "senha": ""}, {**CORPO_VALIDO, "senha": 123}],
-)
-def test_senha_ausente(cliente, suap_falso, corpo):
-    r = validar(cliente, corpo)
-    assert r.status_code == 400
-    assert r.get_json()["erro"] == "senha_ausente"
-    assert suap_falso["chamadas"] == []
 
 
 @pytest.mark.parametrize(
@@ -159,12 +197,11 @@ def test_ordem_das_validacoes(cliente, suap_falso):
     # Tudo errado: a matrícula é verificada primeiro.
     r = validar(cliente, {"matricula": "1"})
     assert r.get_json()["erro"] == "matricula_invalida"
-    # Sem senha e sem catraca: a senha vem antes da catraca.
-    r = validar(cliente, {"matricula": MATRICULA})
-    assert r.get_json()["erro"] == "senha_ausente"
     # Catraca ausente vem antes de catraca não cadastrada.
-    r = validar(cliente, {"matricula": MATRICULA, "senha": SENHA})
+    r = validar(cliente, {"matricula": MATRICULA})
     assert r.get_json()["erro"] == "catraca_ausente"
+    r = validar(cliente, {"matricula": MATRICULA, "catraca_id": "CATRACA-99"})
+    assert r.get_json()["erro"] == "catraca_nao_cadastrada"
     assert suap_falso["chamadas"] == []
 
 
@@ -183,25 +220,38 @@ ERROS_SUAP = [
 ]
 
 
-@pytest.mark.parametrize("etapa", ["autenticar", "buscar_aluno"])
+@pytest.mark.parametrize(
+    "etapa, matricula",
+    [("buscar_aluno", MATRICULA), ("buscar_servidor", MATRICULA_SERVIDOR)],
+)
 @pytest.mark.parametrize("codigo, status_suap, esperado", ERROS_SUAP)
-def test_erros_do_suap(cliente, monkeypatch, etapa, codigo, status_suap, esperado):
+def test_erros_do_suap(cliente, monkeypatch, etapa, matricula,
+                       codigo, status_suap, esperado):
     def falha(*args, **kwargs):
         raise SuapErro(codigo, "mensagem", status_suap=status_suap)
 
-    # Se a falha for na consulta, a autenticação funciona normalmente.
-    monkeypatch.setattr(
-        suap, "autenticar", lambda *a, **k: {"access": TOKEN_ACESSO, "refresh": "r"}
-    )
+    monkeypatch.setattr(suap, "obter_token_servico", lambda config: TOKEN_SERVICO)
     monkeypatch.setattr(suap, etapa, falha)
 
-    r = validar(cliente)
+    r = validar(cliente, {**CORPO_VALIDO, "matricula": matricula})
 
     assert r.status_code == esperado
     corpo = r.get_json()
     assert corpo["erro"] == codigo
     assert "autorizado" not in corpo  # falha do SUAP nunca vira "negado"
-    assert SENHA not in r.get_data(as_text=True)
+    assert TOKEN_SERVICO not in r.get_data(as_text=True)
+
+
+def test_token_de_servico_expirado_vira_503(cliente, monkeypatch):
+    def falha(config):
+        raise SuapErro("token_servico_expirado", "expirado", status_suap=503)
+
+    monkeypatch.setattr(suap, "obter_token_servico", falha)
+
+    r = validar(cliente)
+
+    assert r.status_code == 503
+    assert r.get_json()["erro"] == "token_servico_expirado"
 
 
 def test_metodo_nao_permitido(cliente):
@@ -219,7 +269,8 @@ def test_rota_inexistente(cliente):
 def test_autorizado_unitario():
     assert autorizado(aluno()) is True
     assert autorizado(aluno(situacao="matriculado")) is True
-    assert autorizado(aluno(curso=CURSO_GUARABIRA.lower())) is True
+    assert autorizado(aluno(situacao="  MATRICULADO  ")) is True
+    assert autorizado(aluno(curso="ALIMENTOS (CAMPUS SOUSA)")) is True
     assert autorizado(aluno(situacao="Evadido")) is False
-    assert autorizado(aluno(curso="ALIMENTOS (CAMPUS SOUSA)")) is False
+    assert autorizado(aluno(situacao="")) is False
     assert autorizado(None) is False

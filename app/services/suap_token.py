@@ -10,6 +10,10 @@ import jwt
 logger = logging.getLogger(__name__)
 
 
+class TokenServicoExpirado(Exception):
+    """Token de serviço ausente, inválido ou expirado."""
+
+
 class SuapTokenManager:
 
     def __init__(self, config):
@@ -22,6 +26,14 @@ class SuapTokenManager:
 
         self._margem_expiracao = 30
         self._lock = threading.Lock()
+
+        token_env = (config.get("SUAP_TOKEN") or "").strip()
+        if token_env:
+            try:
+                self._armazenar_tokens(token_env)
+            except Exception:
+                self._access_token = token_env
+                self._access_timeout = 0
 
     def buscar_token(self, matricula, senha):
 
@@ -60,31 +72,35 @@ class SuapTokenManager:
             < self._access_timeout - self._margem_expiracao
         )
 
-    def _calcular_expiracao(self, access_token):
-        payload = jwt.decode(
-            access_token,
-            options={
-                'verify_signature': False,
-                'verify_exp': False,
-                'verify_aud': False
-            }
-        )
+    def _calcular_expiracao(self, token):
+        try:
+            payload = jwt.decode(
+                token,
+                options={
+                    'verify_signature': False,
+                    'verify_exp': False,
+                    'verify_aud': False
+                }
+            )
+        except jwt.PyJWTError as erro:
+            raise TokenServicoExpirado('O token JWT informado é inválido.') from erro
 
         expiracao = payload.get('exp')
 
         if expiracao is None:
-            raise ValueError(
-                'O access token não possui campo exp.'
-            )
+            raise TokenServicoExpirado('O token não possui campo exp.')
 
         tempo_restante = expiracao - time.time()
 
         if tempo_restante <= 0:
-            raise ValueError(
-                'O SUAP retornou um access token expirado.'
-            )
+            raise TokenServicoExpirado('O token de serviço do SUAP está expirado.')
 
         return time.monotonic() + tempo_restante
+
+    def medir_validade(self, token):
+        """Retorna os segundos restantes de validade (campo exp) de um token JWT."""
+        exp_monotonic = self._calcular_expiracao(token)
+        return max(0.0, exp_monotonic - time.monotonic())
 
     def _armazenar_tokens(self, access_token, refresh_token=None):
         expiracao = self._calcular_expiracao(access_token)
@@ -93,7 +109,28 @@ class SuapTokenManager:
         self._access_timeout = expiracao
 
         if refresh_token:
+            self._calcular_expiracao(refresh_token)
             self._refresh_token = refresh_token
+
+    def obter_token_servico(self):
+        """Retorna o token de serviço válido ou lança TokenServicoExpirado (HTTP 503)."""
+        token_config = (self._config.get("SUAP_TOKEN") or "").strip()
+
+        if not token_config:
+            raise TokenServicoExpirado(
+                "O token de serviço do SUAP (SUAP_TOKEN) não está configurado."
+            )
+
+        with self._lock:
+            if self._access_token != token_config:
+                self._armazenar_tokens(token_config)
+
+            if not self.verificar_token():
+                raise TokenServicoExpirado(
+                    "O token de serviço do SUAP está expirado."
+                )
+
+            return self._access_token
 
     def renovar_token(self):
         if not self._refresh_token:

@@ -18,3 +18,4 @@ class Config:
     SUAP_MODO = os.getenv("SUAP_MODO", "simulado")  # simulado | real
     DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
     CATRACAS_CADASTRADAS = _carregar_catracas()
+    SUAP_TOKEN = os.getenv("SUAP_TOKEN", "").strip()
